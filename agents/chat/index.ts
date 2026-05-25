@@ -163,7 +163,7 @@ export async function onRequest(context: any) {
   const rawMessage = body?.message;
 
   // Tracer: set request-level attributes
-  context.tracer?.set_attributes?.({
+  context.tracer?.setAttributes?.({
     'agent.scenario': 'node_starter_chat',
     'chat.conversation_id': cid,
     'chat.has_message': !!rawMessage,
@@ -183,7 +183,7 @@ export async function onRequest(context: any) {
   // Session: load history + save user message
   const session = new ChatSession(context.store);
 
-  const sessionSpan = context.tracer?.start_span?.('session.load_and_save', {
+  const sessionSpan = context.tracer?.startSpan?.('session.load_and_save', {
     'session.conversation_id': cid,
   });
   let history: Array<{ role: string; content: string }> = [];
@@ -193,17 +193,17 @@ export async function onRequest(context: any) {
       session.saveUserMessage(cid, message),
     ]);
     history = hist;
-    sessionSpan?.set_attributes?.({ 'session.history_count': history.length });
+    sessionSpan?.setAttributes?.({ 'session.history_count': history.length });
   } finally {
     sessionSpan?.end?.();
   }
 
   // Tools: build registry from EdgeOne platform tools
-  const toolsSpan = context.tracer?.start_span?.('tools.build');
+  const toolsSpan = context.tracer?.startSpan?.('tools.build');
   let toolRegistry: ReturnType<typeof buildTools>;
   try {
     toolRegistry = buildTools(context, logger);
-    toolsSpan?.set_attributes?.({
+    toolsSpan?.setAttributes?.({
       'tools.count': toolRegistry.tools.length,
       'tools.has_tools': toolRegistry.hasTools(),
     });
@@ -257,7 +257,7 @@ export async function onRequest(context: any) {
           logger.log(`[handler] round ${roundIdx + 1}, messages: ${messages.length}`);
 
           // Tracer: LLM request span
-          const llmSpan = context.tracer?.start_span?.(`llm.request.round_${roundIdx + 1}`, {
+          const llmSpan = context.tracer?.startSpan?.(`llm.request.round_${roundIdx + 1}`, {
             'llm.model': modelConfig.model,
             'llm.request.message_count': messages.length,
             'llm.request.tools_included': 'tools' in payload,
@@ -281,14 +281,14 @@ export async function onRequest(context: any) {
             if (!response.ok) {
               const errorBody = await response.text().catch(() => '');
               logger.error(`[handler] LLM API error: ${response.status} ${errorBody}`);
-              llmSpan?.set_attributes?.({ 'http.status_code': response.status, 'llm.error': true });
+              llmSpan?.setAttributes?.({ 'http.status_code': response.status, 'llm.error': true });
               controller.enqueue(encoder.encode(
                 sseFrame('error', { message: `LLM API error: ${response.status}` }),
               ));
               break;
             }
 
-            llmSpan?.set_attributes?.({ 'http.status_code': 200 });
+            llmSpan?.setAttributes?.({ 'http.status_code': 200 });
 
             // Parse streaming response
             for await (const chunk of parseStreamWithTools(response, signal)) {
@@ -310,7 +310,7 @@ export async function onRequest(context: any) {
               }
             }
           } finally {
-            llmSpan?.set_attributes?.({
+            llmSpan?.setAttributes?.({
               'llm.response.content_length': roundContent.length,
               'llm.response.has_tool_calls': !!toolCalls,
             });
@@ -342,7 +342,7 @@ export async function onRequest(context: any) {
           // Execute tools
           const toolSpans: any[] = [];
           for (const tc of toolCalls) {
-            const ts = context.tracer?.start_span?.(`tool.${tc.name}`, {
+            const ts = context.tracer?.startSpan?.(`tool.${tc.name}`, {
               'tool.name': tc.name,
               'tool.call_id': tc.id,
               'tool.arguments_length': tc.arguments.length,
@@ -355,7 +355,7 @@ export async function onRequest(context: any) {
               toolCalls.map(tc => toolRegistry.execute(tc.name, tc.arguments)),
             );
             for (let i = 0; i < toolSpans.length; i++) {
-              toolSpans[i]?.set_attributes?.({ 'tool.result_length': results[i].length });
+              toolSpans[i]?.setAttributes?.({ 'tool.result_length': results[i].length });
             }
 
             for (let i = 0; i < toolCalls.length; i++) {
@@ -379,7 +379,10 @@ export async function onRequest(context: any) {
           logger.log('[stream] aborted by user');
         } else {
           logger.error('[stream] error:', error.message, error.stack);
-          context.tracer?.record_exception?.(error);
+          context.tracer?.setAttributes?.({
+            'error.type': error.name || 'Error',
+            'error.message': error.message || String(e),
+          });
           controller.enqueue(encoder.encode(
             sseFrame('error', { message: String(error.message ?? e) }),
           ));
@@ -387,7 +390,7 @@ export async function onRequest(context: any) {
       } finally {
         // Save assistant message if any content was generated
         if (assistantContent) {
-          const saveSpan = context.tracer?.start_span?.('session.save_assistant_message', {
+          const saveSpan = context.tracer?.startSpan?.('session.save_assistant_message', {
             'session.conversation_id': cid,
             'session.content_length': assistantContent.length,
           });
