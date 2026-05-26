@@ -5,3 +5,6 @@ dist/
 *.local
 uv.toml
 .DS_Store
+
+# AI assistant local instructions
+CLAUDE.md
