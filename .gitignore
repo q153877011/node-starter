@@ -3,4 +3,5 @@ dist/
 .edgeone/
 .env
 *.local
+uv.toml
 .DS_Store
