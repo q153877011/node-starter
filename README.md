@@ -51,7 +51,7 @@ node-starter/
 |----------|----------|-------------|
 | `AI_GATEWAY_API_KEY` | Yes | LLM API key |
 | `AI_GATEWAY_BASE_URL` | Yes | LLM API base URL (OpenAI-compatible) |
-| `AI_GATEWAY_MODEL` | No | Model name (default: `@Pages/minimax-m2.7`) |
+| `AI_GATEWAY_MODEL` | No | Model name (default: `@makers/minimax-m2.7`) |
 
 ## API Endpoints
 
