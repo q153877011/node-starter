@@ -80,7 +80,7 @@ interface ToolCallAcc {
 async function* parseStreamWithTools(
   response: Response,
   signal?: AbortSignal,
-): AsyncGenerator<{ contentDelta: string; toolCalls: ToolCallAcc[] | null }> {
+): AsyncGenerator<{ contentDelta: string; toolCalls: ToolCallAcc[] | null; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
   const reader = response.body?.getReader();
   if (!reader) return;
 
@@ -88,6 +88,7 @@ async function* parseStreamWithTools(
   let buffer = '';
   const toolCallsAcc: Map<number, ToolCallAcc> = new Map();
   let finishReason = '';
+  let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
 
   try {
     while (true) {
@@ -114,6 +115,11 @@ async function* parseStreamWithTools(
           chunk = JSON.parse(jsonStr);
         } catch {
           continue;
+        }
+
+        // Capture usage from the final chunk
+        if (chunk?.usage) {
+          usage = chunk.usage;
         }
 
         const choices = chunk?.choices;
@@ -161,7 +167,9 @@ async function* parseStreamWithTools(
     const sorted = [...toolCallsAcc.entries()]
       .sort(([a], [b]) => a - b)
       .map(([, v]) => v);
-    yield { contentDelta: '', toolCalls: sorted };
+    yield { contentDelta: '', toolCalls: sorted, usage };
+  } else if (usage) {
+    yield { contentDelta: '', toolCalls: null, usage };
   }
 }
 
@@ -260,6 +268,7 @@ export async function onRequest(context: any) {
             model: modelConfig.model,
             messages,
             stream: true,
+            stream_options: { include_usage: true },
           };
           if (toolRegistry.hasTools()) {
             payload.tools = toolRegistry.tools;
@@ -271,7 +280,10 @@ export async function onRequest(context: any) {
 
           // Tracer: LLM request span
           const llmSpan = context.tracer?.startSpan?.(`llm.request.round_${roundIdx + 1}`, {
-            'llm.model': modelConfig.model,
+            'openinference.span.kind': 'LLM',
+            'llm.model_name': modelConfig.model,
+            'llm.provider': 'openai',
+            'llm.request.type': 'chat',
             'llm.request.message_count': messages.length,
             'llm.request.tools_included': 'tools' in payload,
             'llm.request.round': roundIdx + 1,
@@ -320,6 +332,14 @@ export async function onRequest(context: any) {
 
               if (chunk.toolCalls !== null) {
                 toolCalls = chunk.toolCalls;
+              }
+
+              if (chunk.usage) {
+                llmSpan?.setAttributes?.({
+                  'llm.token_count.prompt': chunk.usage.prompt_tokens,
+                  'llm.token_count.completion': chunk.usage.completion_tokens,
+                  'llm.token_count.total': chunk.usage.total_tokens,
+                });
               }
             }
           } finally {
