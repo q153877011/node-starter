@@ -17,11 +17,19 @@ export const API = {
   history: '/history',
 } as const;
 
+export interface RawSseEvent {
+  eventType: string;
+  data: unknown;
+  raw: string;
+  timestamp: number;
+}
+
 export interface StreamCallbacks {
   onTextDelta: (delta: string) => void;
   onToolCalled: (toolName: string) => void;
   onDone: () => void;
   onError: (err: Error) => void;
+  onRawEvent?: (event: RawSseEvent) => void;
 }
 
 /** Get conversation history for restoring the chat window after page refresh. */
@@ -32,7 +40,7 @@ export async function fetchConversationHistory(conversationId: string): Promise<
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'pages-agent-conversation-id': conversationId,
+          'makers-conversation-id': conversationId,
         },
         body: JSON.stringify({}),
       });
@@ -74,7 +82,7 @@ export function sendMessageStream(
         'Content-Type': 'application/json',
       };
       if (conversationId) {
-        headers['pages-agent-conversation-id'] = conversationId;
+        headers['makers-conversation-id'] = conversationId;
       }
 
       const res = await fetch(API.chat, {
@@ -144,6 +152,16 @@ function dispatchSseChunk(part: string, cb: StreamCallbacks, markDone: () => voi
 
   try {
     const parsed = JSON.parse(data);
+
+    if (cb.onRawEvent) {
+      cb.onRawEvent({
+        eventType,
+        data: parsed,
+        raw: data,
+        timestamp: Date.now(),
+      });
+    }
+
     switch (eventType) {
       case 'text_delta':
         cb.onTextDelta(parsed.delta);
@@ -160,7 +178,14 @@ function dispatchSseChunk(part: string, cb: StreamCallbacks, markDone: () => voi
         break;
     }
   } catch {
-    // Ignore parse failures
+    if (cb.onRawEvent) {
+      cb.onRawEvent({
+        eventType,
+        data: null,
+        raw: data,
+        timestamp: Date.now(),
+      });
+    }
   }
 }
 

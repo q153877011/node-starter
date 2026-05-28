@@ -52,6 +52,18 @@ function sseFrame(event: string, data: Record<string, unknown>): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+/** Redact base64 image data to prevent flooding the trace panel */
+function redactBase64Image(text: string): string {
+  return text.replace(/"base64Image"\s*:\s*"[A-Za-z0-9+/=]{100,}"/g, '"base64Image":"[REDACTED image data]"');
+}
+
+/** Truncate and redact sensitive content for safe preview in trace events */
+function safeJsonPreview(value: unknown, maxLength = 1200): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const redacted = redactBase64Image(text || '');
+  return redacted.length > maxLength ? `${redacted.slice(0, maxLength)}...<truncated>` : redacted;
+}
+
 // ========== SSE Stream Parser ==========
 
 interface ToolCallAcc {
@@ -342,6 +354,14 @@ export async function onRequest(context: any) {
             controller.enqueue(encoder.encode(
               sseFrame('tool_called', { tool: tc.name }),
             ));
+            controller.enqueue(encoder.encode(
+              sseFrame('tool_debug', {
+                phase: 'call',
+                tool: tc.name,
+                id: tc.id,
+                argumentsPreview: safeJsonPreview(tc.arguments, 1200),
+              }),
+            ));
           }
 
           // Execute tools
@@ -357,11 +377,30 @@ export async function onRequest(context: any) {
 
           try {
             const results = await Promise.all(
-              toolCalls.map(tc => toolRegistry.execute(tc.name, tc.arguments)),
+              toolCalls.map(async (tc, i) => {
+                const startedAt = Date.now();
+                const result = await toolRegistry.execute(tc.name, tc.arguments);
+                const durationMs = Date.now() - startedAt;
+
+                toolSpans[i]?.setAttributes?.({ 'tool.result_length': result.length });
+
+                const resultPreview = safeJsonPreview(result, 2000);
+                const isError = result.includes('"error"');
+                controller.enqueue(encoder.encode(
+                  sseFrame('tool_debug', {
+                    phase: 'result',
+                    tool: tc.name,
+                    id: tc.id,
+                    resultPreview,
+                    resultLength: result.length,
+                    durationMs,
+                    ...(isError ? { error: resultPreview } : {}),
+                  }),
+                ));
+
+                return result;
+              }),
             );
-            for (let i = 0; i < toolSpans.length; i++) {
-              toolSpans[i]?.setAttributes?.({ 'tool.result_length': results[i].length });
-            }
 
             for (let i = 0; i < toolCalls.length; i++) {
               logger.log(`[tool] ${toolCalls[i].name}: ${results[i].slice(0, 200)}`);

@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Message, ToolLampState } from './types';
+import type { RawSseEvent } from './api';
 import { fetchConversationHistory, sendMessageStream, stopAgent } from './api';
 import { I18nProvider, LangToggle, useT, MessageKeys } from './i18n';
 import ToolIndicators from './components/ToolIndicators';
 import ChatWindow from './components/ChatWindow';
 import ChatInput from './components/ChatInput';
 import CodeViewer from './components/CodeViewer';
+import TracePanel from './components/TracePanel';
 import styles from './App.module.css';
 
 const LAMP_IDS = ['commands', 'files', 'code_interpreter', 'browser'] as const;
@@ -49,6 +51,8 @@ function AppInner() {
   const [lamps, setLamps]       = useState<ToolLampState[]>(buildLamps);
   const [loading, setLoading]   = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [traceEvents, setTraceEvents] = useState<RawSseEvent[]>([]);
+  const [rightPanelMode, setRightPanelMode] = useState<'code' | 'trace'>('code');
 
   const botMsgIdRef = useRef<string>('');
   const abortCtrlRef = useRef<AbortController | null>(null);
@@ -98,6 +102,8 @@ function AppInner() {
   const handleSend = useCallback(async (text: string) => {
     if (loading) return;
 
+    setRightPanelMode('trace');
+
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -133,6 +139,11 @@ function AppInner() {
         lampTimers.current.set(toolName, tid);
       },
 
+      onRawEvent(event) {
+        setRightPanelMode('trace');
+        setTraceEvents(prev => [...prev, event]);
+      },
+
       onDone: finishStream,
 
       onError() {
@@ -155,6 +166,8 @@ function AppInner() {
     localStorage.setItem(CONVERSATION_ID_STORAGE_KEY, newId);
     conversationIdRef.current = newId;
     setMessages([]);
+    setTraceEvents([]);
+    setRightPanelMode('code');
   }, []);
 
   const handleStop = useCallback(() => {
@@ -203,7 +216,11 @@ function AppInner() {
         </div>
 
         <div className={styles.codePanel}>
-          <CodeViewer />
+          {rightPanelMode === 'code' ? (
+            <CodeViewer />
+          ) : (
+            <TracePanel events={traceEvents} onClear={() => setTraceEvents([])} />
+          )}
         </div>
       </div>
     </div>

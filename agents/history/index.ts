@@ -40,12 +40,6 @@ function contentToText(content: unknown): string {
 export async function onRequest(context: any) {
   const cid: string = context.conversation_id ?? '';
 
-  // Tracer: set request-level attributes
-  context.tracer?.setAttributes?.({
-    'agent.scenario': 'history_query',
-    'history.conversation_id': cid,
-  });
-
   const store = context.store ?? null;
   if (!store || !cid) {
     return new Response(JSON.stringify({ messages: [] }), {
@@ -54,27 +48,15 @@ export async function onRequest(context: any) {
     });
   }
 
-  // Tracer: wrap store query
-  const historySpan = context.tracer?.startSpan?.('session.get_messages', {
-    'session.conversation_id': cid,
-  });
-
   let history: any[] = [];
   try {
     history = await store.getMessages({ conversationId: cid, limit: 100, order: 'asc' });
-    historySpan?.setAttributes?.({ 'session.message_count': history?.length ?? 0 });
   } catch (e: unknown) {
     logger.error(`[history] failed to get messages: ${e}`);
-    historySpan?.setAttributes?.({
-      'error.type': e instanceof Error ? e.name : 'UnknownError',
-      'error.message': e instanceof Error ? e.message : String(e),
-    });
     return new Response(JSON.stringify({ messages: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     });
-  } finally {
-    historySpan?.end?.();
   }
 
   interface FrontendMessage {

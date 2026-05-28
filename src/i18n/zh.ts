@@ -31,6 +31,13 @@ const zh = {
 
   // Language toggle
   "lang.switch": "English",
+
+  // Trace panel
+  "trace.title": "Trace",
+  "trace.events": "事件",
+  "trace.clear": "清除",
+  "trace.empty": "等待 SSE 事件...",
+  "trace.emptyHint": "发送消息后，原始后端 SSE 数据会显示在这里。",
 } as const;
 
 export default zh;
