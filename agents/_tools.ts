@@ -1,99 +1,13 @@
 /**
  * Tools module -- private module (starts with _), not mapped as a route.
  *
- * Extracts EdgeOne platform tools from context.tools and converts them to
- * OpenAI-compatible function calling format for the chat/completions API.
+ * Extracts EdgeOne platform tools from context.tools and passes them through
+ * directly to the chat/completions API.
  *
  * EdgeOne provides sandbox tools: commands, files, code_interpreter, browser.
  */
 
-interface ToolSchema {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-}
-
-const TOOL_SCHEMAS: Record<string, ToolSchema> = {
-  commands: {
-    type: 'function',
-    function: {
-      name: 'commands',
-      description: 'Execute a shell command in the EdgeOne sandbox environment',
-      parameters: {
-        type: 'object',
-        properties: {
-          cmd: { type: 'string', description: 'Shell command to execute' },
-          cwd: { type: 'string', description: 'Working directory (optional)' },
-        },
-        required: ['cmd'],
-      },
-    },
-  },
-  files: {
-    type: 'function',
-    function: {
-      name: 'files',
-      description: 'Perform file operations in the EdgeOne sandbox: read, write, list, exists, remove, makeDir',
-      parameters: {
-        type: 'object',
-        properties: {
-          op: {
-            type: 'string',
-            enum: ['read', 'write', 'list', 'exists', 'remove', 'makeDir'],
-            description: 'File operation to perform',
-          },
-          path: { type: 'string', description: 'File or directory path' },
-          content: { type: 'string', description: 'Content for write operation' },
-        },
-        required: ['op', 'path'],
-      },
-    },
-  },
-  code_interpreter: {
-    type: 'function',
-    function: {
-      name: 'code_interpreter',
-      description: 'Run code in an isolated interpreter in the EdgeOne sandbox',
-      parameters: {
-        type: 'object',
-        properties: {
-          language: {
-            type: 'string',
-            enum: ['python', 'javascript', 'r', 'bash'],
-            description: 'Programming language to execute',
-          },
-          code: { type: 'string', description: 'Source code to execute' },
-        },
-        required: ['language', 'code'],
-      },
-    },
-  },
-  browser: {
-    type: 'function',
-    function: {
-      name: 'browser',
-      description: 'Interact with web pages in the EdgeOne sandbox: fetch, screenshot, click, type, evaluate',
-      parameters: {
-        type: 'object',
-        properties: {
-          op: {
-            type: 'string',
-            enum: ['fetch', 'screenshot', 'click', 'type', 'evaluate'],
-            description: 'Browser operation to perform',
-          },
-          url: { type: 'string', description: 'Target URL (for fetch)' },
-          selector: { type: 'string', description: 'CSS selector' },
-          text: { type: 'string', description: 'Text to type' },
-          script: { type: 'string', description: 'JavaScript to evaluate' },
-        },
-        required: ['op'],
-      },
-    },
-  },
-};
+type ToolSchema = Record<string, unknown>;
 
 /**
  * Registry holding tool schemas and handlers extracted from context.tools.
@@ -164,21 +78,28 @@ export function buildTools(context: any, logger?: any): ToolRegistry {
 
   for (const item of rawTools || []) {
     const name: string | undefined = item?.name ?? item?.function?.name;
-    const schema = TOOL_SCHEMAS[name || ''];
     const handler = item?.execute ?? item?.handler ?? item?.invoke;
 
     if (logger) {
-      logger.log(`[tools] inspecting: name=${name}, has_schema=${!!schema}, callable=${typeof handler === 'function'}`);
+      logger.log(`[tools] inspecting: name=${name}, callable=${typeof handler === 'function'}`);
     }
 
-    if (!name || !schema || typeof handler !== 'function') {
+    if (!name || typeof handler !== 'function') {
       if (logger) {
         logger.log(`[tools] skipped: ${name || '<unknown>'}`);
       }
       continue;
     }
 
-    registry.register(name, schema, handler);
+    registry.register(name, {
+      ...item,
+      type: 'function',
+      function: item?.function ?? {
+        name,
+        description: item?.description ?? '',
+        parameters: item?.parameters ?? item?.inputSchema ?? item?.input_schema ?? { type: 'object', properties: {} },
+      },
+    }, handler);
     if (logger) {
       logger.log(`[tools] registered: ${name}`);
     }
