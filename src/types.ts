@@ -3,6 +3,11 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  activity?: {
+    type: 'web_search';
+    label: string;
+    status: 'active' | 'done';
+  };
 }
 
 export interface ToolLampState {
